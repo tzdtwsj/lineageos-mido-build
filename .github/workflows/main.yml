@@ -18,10 +18,9 @@ on:
       - 'release-*'
 
 env:
-  WORK_DIR: /mnt/build/android
+  WORK_DIR: ${{ github.workspace }}/android
   DEVICE: mido
   BRANCH: lineage-16.0
-  GH_USERNAME: tzdtwsj
 
 jobs:
   build:
@@ -38,13 +37,12 @@ jobs:
         remove-android: true
         remove-haskell: true
         remove-codeql: true
-        build-mount-path: /mnt/build
         remove-docker-images: true
     
-    - name: Checkout local_manifests
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        path: ${{ env.WORK_DIR }}/local_manifests
+        path: ${{ github.workspace }}/local_manifests
     
     - name: Install build dependencies
       run: |
@@ -71,32 +69,33 @@ jobs:
     
     - name: Create working directory
       run: |
-        sudo mkdir -p ${{ env.WORK_DIR }}
-        sudo chown -R $USER:$USER ${{ env.WORK_DIR }}
+        mkdir -p ${{ env.WORK_DIR }}
         cd ${{ env.WORK_DIR }}
+        pwd
     
     - name: Initialize repo
       working-directory: ${{ env.WORK_DIR }}
       run: |
         repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1
     
-    # 修复后的 Setup local manifests 步骤
+    # 修复后的 Setup local manifests - 完全避免使用 cat
     - name: Setup local manifests
       run: |
         # 创建local_manifests目录
         mkdir -p ${{ env.WORK_DIR }}/.repo/local_manifests
         
-        # 如果用户仓库中有local_manifests，复制它们
-        if [ -d "${{ env.WORK_DIR }}/local_manifests" ]; then
+        # 检查从仓库检出的local_manifests
+        if [ -d "${{ github.workspace }}/local_manifests" ]; then
           echo "Copying local manifests from repository..."
-          cp -v ${{ env.WORK_DIR }}/local_manifests/*.xml ${{ env.WORK_DIR }}/.repo/local_manifests/ 2>/dev/null || echo "No XML files found in repository"
+          # 复制所有xml文件
+          find "${{ github.workspace }}/local_manifests" -name "*.xml" -exec cp -v {} ${{ env.WORK_DIR }}/.repo/local_manifests/ \;
         fi
         
         # 检查是否有任何manifest文件，如果没有则创建默认的mido配置
-        if [ ! -f "${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml" ] && [ ! -f "${{ env.WORK_DIR }}/.repo/local_manifests/*.xml" ]; then
+        if [ ! -f "${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml" ] && [ -z "$(ls -A ${{ env.WORK_DIR }}/.repo/local_manifests/ 2>/dev/null)" ]; then
           echo "Creating default mido manifest..."
           
-          # 使用printf或cat直接写入文件，避免YAML语法问题
+          # 使用 printf 写入文件（完全避免YAML语法冲突）
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
             '<manifest>' \
