@@ -99,11 +99,59 @@ jobs:
         echo "USE_CCACHE=1" >> ~/.bashrc
         echo "CCACHE_DIR=${{ env.WORK_DIR }}/.ccache" >> ~/.bashrc
     
+    # 修复后的 Setup build environment 步骤
     - name: Setup build environment
       working-directory: ${{ env.WORK_DIR }}
       run: |
         source build/envsetup.sh
-        breakfast ${{ env.DEVICE }}
+        
+        echo "Available devices (first 20):"
+        lunch | head -20
+        
+        echo "Attempting breakfast ${{ env.DEVICE }}..."
+        if ! breakfast ${{ env.DEVICE }}; then
+          echo "breakfast failed, trying alternative approach..."
+          
+          # 尝试直接使用 lunch
+          echo "Searching for ${{ env.DEVICE }} in lunch menu:"
+          lunch | grep -i "${{ env.DEVICE }}" || true
+          
+          # 尝试常见的设备名称变体
+          for VARIANT in "lineage_${{ env.DEVICE }}" "${{ env.DEVICE }}" "full_${{ env.DEVICE }}"; do
+            echo "Trying with TARGET_PRODUCT=${VARIANT}"
+            export TARGET_PRODUCT=${VARIANT}
+            export TARGET_BUILD_VARIANT=userdebug
+            if lunch ${TARGET_PRODUCT}-${TARGET_BUILD_VARIANT} 2>/dev/null; then
+              echo "Success with ${VARIANT}"
+              exit 0
+            fi
+          done
+          
+          echo "Error: Device ${{ env.DEVICE }} not found in source tree"
+          echo "Checking device tree location..."
+          
+          # 检查设备树
+          if [ -d "device/xiaomi/${{ env.DEVICE }}" ]; then
+            echo "✓ Device tree found at device/xiaomi/${{ env.DEVICE }}"
+            ls -la device/xiaomi/${{ env.DEVICE }}/
+          else
+            echo "✗ Device tree not found at device/xiaomi/${{ env.DEVICE }}"
+          fi
+          
+          # 搜索任何 mido 相关的目录
+          echo "Searching for any mido directories..."
+          find . -type d -name "*mido*" 2>/dev/null | head -10 || echo "No mido directories found"
+          
+          # 列出 device/xiaomi 目录内容
+          if [ -d "device/xiaomi" ]; then
+            echo "Contents of device/xiaomi:"
+            ls -la device/xiaomi/
+          fi
+          
+          exit 1
+        fi
+        
+        echo "✓ Build environment setup successful"
     
     - name: Clean build if requested
       working-directory: ${{ env.WORK_DIR }}
@@ -125,6 +173,14 @@ jobs:
         
         echo "Disk space before build:"
         df -h
+        
+        # 确保环境已设置
+        if [ -z "$TARGET_PRODUCT" ]; then
+          echo "TARGET_PRODUCT not set, attempting to set..."
+          export TARGET_PRODUCT=lineage_${{ env.DEVICE }}
+          export TARGET_BUILD_VARIANT=userdebug
+          lunch
+        fi
         
         mka bacon -j$(nproc --all) 2>&1 | tee build.log
         
