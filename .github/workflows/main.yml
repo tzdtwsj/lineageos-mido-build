@@ -28,12 +28,6 @@ jobs:
     timeout-minutes: 480
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        path: ${{ github.workspace }}/local_manifests
-    
-    # 修复后的依赖安装 - 更新了包名以适配 Ubuntu 24.04
     - name: Install build dependencies
       run: |
         sudo apt-get update
@@ -68,40 +62,6 @@ jobs:
       run: |
         repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1
     
-    - name: Setup local manifests
-      run: |
-        # 创建local_manifests目录
-        mkdir -p ${{ env.WORK_DIR }}/.repo/local_manifests
-        
-        # 检查从仓库检出的local_manifests
-        if [ -d "${{ github.workspace }}/local_manifests" ]; then
-          echo "Copying local manifests from repository..."
-          # 复制所有xml文件
-          find "${{ github.workspace }}/local_manifests" -name "*.xml" -exec cp -v {} ${{ env.WORK_DIR }}/.repo/local_manifests/ \;
-        fi
-        
-        # 检查是否有任何manifest文件，如果没有则创建默认的mido配置
-        if [ ! -f "${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml" ] && [ -z "$(ls -A ${{ env.WORK_DIR }}/.repo/local_manifests/ 2>/dev/null)" ]; then
-          echo "Creating default mido manifest..."
-          
-          # 使用 printf 写入文件
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<manifest>' \
-            '  <!-- mido device tree -->' \
-            '  <project name="LineageOS/android_device_xiaomi_mido" path="device/xiaomi/mido" remote="github" revision="lineage-16.0" />' \
-            '  <!-- mido vendor tree -->' \
-            '  <project name="TheMuppets/proprietary_vendor_xiaomi" path="vendor/xiaomi" remote="github" revision="lineage-16.0" />' \
-            '  <!-- mido kernel tree -->' \
-            '  <project name="LineageOS/android_kernel_xiaomi_msm8953" path="kernel/xiaomi/msm8953" remote="github" revision="lineage-16.0" />' \
-            '</manifest>' > ${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml
-          
-          echo "Default manifest created at ${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml"
-        else
-          echo "Using existing local manifests:"
-          ls -la ${{ env.WORK_DIR }}/.repo/local_manifests/
-        fi
-    
     - name: Sync source
       working-directory: ${{ env.WORK_DIR }}
       run: |
@@ -110,7 +70,6 @@ jobs:
           exit 0
         fi
         
-        # 显示磁盘空间使用情况
         echo "Disk space before sync:"
         df -h
         
