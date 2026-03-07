@@ -28,16 +28,7 @@ jobs:
     timeout-minutes: 480
     
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 8192
-        swap-size-mb: 8192
-        remove-dotnet: true
-        remove-android: true
-        remove-haskell: true
-        remove-codeql: true
-        remove-docker-images: true
+    # 移除有问题的 Maximize build space 步骤
     
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -78,7 +69,6 @@ jobs:
       run: |
         repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1
     
-    # 修复后的 Setup local manifests - 完全避免使用 cat
     - name: Setup local manifests
       run: |
         # 创建local_manifests目录
@@ -95,7 +85,7 @@ jobs:
         if [ ! -f "${{ env.WORK_DIR }}/.repo/local_manifests/mido.xml" ] && [ -z "$(ls -A ${{ env.WORK_DIR }}/.repo/local_manifests/ 2>/dev/null)" ]; then
           echo "Creating default mido manifest..."
           
-          # 使用 printf 写入文件（完全避免YAML语法冲突）
+          # 使用 printf 写入文件
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
             '<manifest>' \
@@ -121,6 +111,10 @@ jobs:
           exit 0
         fi
         
+        # 显示磁盘空间使用情况
+        echo "Disk space before sync:"
+        df -h
+        
         for i in {1..3}; do
           echo "Sync attempt $i"
           if repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune; then
@@ -134,13 +128,16 @@ jobs:
           echo "Sync failed, retrying in 30 seconds..."
           sleep 30
         done
+        
+        echo "Disk space after sync:"
+        df -h
     
     - name: Setup ccache
       working-directory: ${{ env.WORK_DIR }}
       run: |
         export USE_CCACHE=1
         export CCACHE_DIR=${{ env.WORK_DIR }}/.ccache
-        prebuilts/misc/linux-x86/ccache/ccache -M 20G
+        prebuilts/misc/linux-x86/ccache/ccache -M 10G  # 减少ccache大小
         echo "USE_CCACHE=1" >> ~/.bashrc
         echo "CCACHE_DIR=${{ env.WORK_DIR }}/.ccache" >> ~/.bashrc
     
@@ -167,12 +164,21 @@ jobs:
       continue-on-error: false
       run: |
         source build/envsetup.sh
+        
+        # 显示编译前的磁盘空间
+        echo "Disk space before build:"
+        df -h
+        
+        # 使用较少的并行任务，避免内存不足
         mka bacon -j$(nproc --all) 2>&1 | tee build.log
         
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
           echo "Build failed!"
           exit 1
         fi
+        
+        echo "Disk space after build:"
+        df -h
     
     - name: Find artifacts
       id: find_artifacts
