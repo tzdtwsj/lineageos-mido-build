@@ -1,0 +1,168 @@
+name: Build LineageOS 16 for mido
+
+# 触发条件：当有代码推送到 master/main 分支，或创建 tag 时
+on:
+  push:
+    branches:
+      - master
+      - main
+    # 也可以考虑通过创建标签来触发，例如 v1.0
+    # tags:
+    #   - 'v*'
+  # 允许手动触发工作流
+  workflow_dispatch:
+
+# 环境变量，可以在这里配置一些通用参数
+env:
+  # 源码目录
+  SOURCE_DIR: ${{ github.workspace }}/android
+  # 设备代号
+  DEVICE_CODENAME: mido
+  # LineageOS 版本
+  BRANCH_NAME: lineage-16.0
+
+jobs:
+  build:
+    # 选择运行环境，Ubuntu 20.04 对旧版Android编译支持较好
+    runs-on: ubuntu-20.04
+    # 设置超时时间，防止编译任务无限执行 (e.g., 6小时)
+    timeout-minutes: 360
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          build-mount-path: '/mnt/build'
+
+      # 1. 检出仓库 (如果你的仓库包含设备树、内核或补丁)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.SOURCE_DIR }}/local_manifests
+
+      # 2. 安装编译依赖
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev \
+            lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev \
+            libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+            squashfs-tools xsltproc zip zlib1g-dev \
+            python3 python3-venv
+
+      # 3. 设置 Git 用户信息 (LineageOS 编译需要)
+      - name: Setup git config
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 4. 安装 repo 工具
+      - name: Install repo
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      # 5. 初始化 LineageOS 源码仓库
+      - name: Initialize repo
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH_NAME }} --depth=1
+
+      # 6. 同步源码 (这一步非常耗时)
+      - name: Sync repo
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune --force-sync -j$(nproc)
+
+      # 7. 将你的本地清单（设备树、内核等）链接到 .repo/local_manifests
+      - name: Link local manifests
+        run: |
+          if [ -d "${{ env.SOURCE_DIR }}/local_manifests" ]; then
+            mkdir -p ${{ env.SOURCE_DIR }}/.repo/local_manifests
+            cp -r ${{ env.SOURCE_DIR }}/local_manifests/*.xml ${{ env.SOURCE_DIR }}/.repo/local_manifests/
+          else
+            echo "No local manifests found. Skipping."
+          fi
+
+      # 8. 再次同步以拉取设备相关源码
+      - name: Sync device trees
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          repo sync --force-sync -j$(nproc)
+
+      # 9. 设置编译环境
+      - name: Setup build environment
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          source build/envsetup.sh
+          echo "source build/envsetup.sh" >> ~/.bashrc
+
+      # 10. 使用 CCache 加速编译 (可选，但推荐)
+      - name: Setup CCache
+        run: |
+          echo "export USE_CCACHE=1" >> ~/.bashrc
+          echo "export CCACHE_DIR=${{ env.SOURCE_DIR }}/.ccache" >> ~/.bashrc
+          ${{ env.SOURCE_DIR }}/prebuilts/misc/linux-x86/ccache/ccache -M 10G
+
+      # 11. 针对你的设备进行编译
+      - name: Build ROM
+        id: build_step
+        working-directory: ${{ env.SOURCE_DIR }}
+        continue-on-error: false
+        run: |
+          source build/envsetup.sh
+          # 选择编译目标，这里的 "mido" 是设备名
+          # 常见的编译命令可能是 breakfast 或 lunch
+          breakfast ${{ env.DEVICE_CODENAME }}
+          # 开始编译，使用 -j 参数。注意 GitHub Actions 的 vCPU 核心数有限。
+          # 也可以编译特定的包，如 bacon (完整ROM包)
+          mka bacon -j$(nproc)
+
+      # 12. 查找并准备编译出的 ROM 包
+      - name: Find artifacts
+        id: find_artifacts
+        working-directory: ${{ env.SOURCE_DIR }}
+        run: |
+          # 定义输出目录
+          TARGET_DIR="${{ env.SOURCE_DIR }}/out/target/product/${{ env.DEVICE_CODENAME }}"
+          ARTIFACT_NAME="lineage-16.0-*-UNOFFICIAL-${{ env.DEVICE_CODENAME }}.zip"
+
+          # 查找文件
+          ARTIFACT_PATH=$(find ${TARGET_DIR} -maxdepth 1 -name "${ARTIFACT_NAME}" -print -quit)
+
+          if [ -z "$ARTIFACT_PATH" ]; then
+            echo "::error::Build artifact not found!"
+            exit 1
+          fi
+
+          echo "Artifact found: $ARTIFACT_PATH"
+          # 将文件路径和文件名保存为环境变量供后续步骤使用
+          echo "artifact_path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
+          echo "artifact_name=$(basename ${ARTIFACT_PATH})" >> $GITHUB_OUTPUT
+
+      # 13. 创建 Release 并上传编译产物
+      - name: Release and Upload
+        uses: softprops/action-gh-release@v2
+        # 只在推送 tag 时执行
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          # 可以自定义 Release 名称
+          name: LineageOS 16 for mido ${{ github.ref_name }}
+          # 引用上一步找到的编译产物路径
+          files: ${{ steps.find_artifacts.outputs.artifact_path }}
+          # 生成 release 说明
+          generate_release_notes: true
+          # 如果是测试版可以标记为 prerelease
+          # prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
