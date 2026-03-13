@@ -21,8 +21,10 @@ env:
   WORK_DIR: ${{ github.workspace }}/android
   DEVICE: mido
   BRANCH: lineage-16.0
-  VENDOR_REPO: https://github.com/xiaomi-msm8953-devs/proprietary_vendor_xiaomi_msm8953-common
-  VENDOR_PATH: vendor/xiaomi/msm8953-common
+  VENDOR_COMMON_REPO: https://github.com/xiaomi-msm8953-devs/proprietary_vendor_xiaomi_msm8953-common
+  VENDOR_COMMON_PATH: vendor/xiaomi/msm8953-common
+  VENDOR_MIDO_REPO: https://github.com/NRanjan-17/vendor_xiaomi_mido
+  VENDOR_MIDO_PATH: vendor/xiaomi/mido
 
 jobs:
   build:
@@ -92,50 +94,91 @@ jobs:
         echo "Disk space after sync:"
         df -h
     
-    # 新增：同步 vendor 仓库
-    - name: Sync vendor repository
+    # 新增：同步公共 vendor 仓库 (msm8953-common)
+    - name: Sync common vendor repository
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        echo "Syncing vendor repository: ${{ env.VENDOR_REPO }}"
+        echo "Syncing common vendor repository: ${{ env.VENDOR_COMMON_REPO }}"
         
         # 创建 vendor 目录（如果不存在）
-        mkdir -p ${{ env.VENDOR_PATH }}
+        mkdir -p ${{ env.VENDOR_COMMON_PATH }}
         
         # 检查是否已经存在 vendor 仓库
-        if [ -d "${{ env.VENDOR_PATH }}/.git" ]; then
-          echo "Vendor repository exists, updating..."
-          cd ${{ env.VENDOR_PATH }}
+        if [ -d "${{ env.VENDOR_COMMON_PATH }}/.git" ]; then
+          echo "Common vendor repository exists, updating..."
+          cd ${{ env.VENDOR_COMMON_PATH }}
           git pull
           cd ${{ env.WORK_DIR }}
         else
-          echo "Cloning vendor repository..."
+          echo "Cloning common vendor repository..."
           # 克隆 vendor 仓库
-          git clone --depth=1 ${{ env.VENDOR_REPO }} ${{ env.VENDOR_PATH }}
+          git clone --depth=1 ${{ env.VENDOR_COMMON_REPO }} ${{ env.VENDOR_COMMON_PATH }}
         fi
         
         # 验证 vendor 仓库是否成功克隆
-        if [ -d "${{ env.VENDOR_PATH }}" ]; then
-          echo "✓ Vendor repository synced successfully"
-          echo "Vendor repository contents:"
-          ls -la ${{ env.VENDOR_PATH }}/
+        if [ -d "${{ env.VENDOR_COMMON_PATH }}" ]; then
+          echo "✓ Common vendor repository synced successfully"
+          echo "Common vendor repository contents:"
+          ls -la ${{ env.VENDOR_COMMON_PATH }}/
         else
-          echo "✗ Failed to sync vendor repository"
+          echo "✗ Failed to sync common vendor repository"
           exit 1
         fi
     
-    # 新增：创建 vendor 目录的符号链接（如果需要）
-    - name: Setup vendor symlinks
+    # 新增：同步 mido 专用 vendor 仓库
+    - name: Sync mido vendor repository
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        # 检查是否需要为 mido 创建符号链接
-        if [ ! -d "vendor/xiaomi/mido" ] && [ -d "${{ env.VENDOR_PATH }}" ]; then
-          echo "Creating symlink for mido vendor..."
-          mkdir -p vendor/xiaomi
-          ln -sf ../msm8953-common vendor/xiaomi/mido
+        echo "Syncing mido vendor repository: ${{ env.VENDOR_MIDO_REPO }}"
+        
+        # 创建 vendor 目录（如果不存在）
+        mkdir -p ${{ env.VENDOR_MIDO_PATH }}
+        
+        # 检查是否已经存在 vendor 仓库
+        if [ -d "${{ env.VENDOR_MIDO_PATH }}/.git" ]; then
+          echo "Mido vendor repository exists, updating..."
+          cd ${{ env.VENDOR_MIDO_PATH }}
+          git pull
+          cd ${{ env.WORK_DIR }}
+        else
+          echo "Cloning mido vendor repository..."
+          # 克隆 vendor 仓库
+          git clone --depth=1 ${{ env.VENDOR_MIDO_REPO }} ${{ env.VENDOR_MIDO_PATH }}
         fi
         
-        echo "Vendor directory structure:"
-        ls -la vendor/xiaomi/ || echo "vendor/xiaomi not found"
+        # 验证 vendor 仓库是否成功克隆
+        if [ -d "${{ env.VENDOR_MIDO_PATH }}" ]; then
+          echo "✓ Mido vendor repository synced successfully"
+          echo "Mido vendor repository contents:"
+          ls -la ${{ env.VENDOR_MIDO_PATH }}/
+        else
+          echo "✗ Failed to sync mido vendor repository"
+          exit 1
+        fi
+    
+    # 新增：检查 vendor 文件结构
+    - name: Verify vendor structure
+      working-directory: ${{ env.WORK_DIR }}
+      run: |
+        echo "Checking vendor directory structure..."
+        
+        # 检查公共 vendor 目录
+        if [ -d "${{ env.VENDOR_COMMON_PATH }}" ]; then
+          echo "✓ Common vendor found at ${{ env.VENDOR_COMMON_PATH }}"
+        else
+          echo "✗ Common vendor not found at ${{ env.VENDOR_COMMON_PATH }}"
+        fi
+        
+        # 检查 mido vendor 目录
+        if [ -d "${{ env.VENDOR_MIDO_PATH }}" ]; then
+          echo "✓ Mido vendor found at ${{ env.VENDOR_MIDO_PATH }}"
+        else
+          echo "✗ Mido vendor not found at ${{ env.VENDOR_MIDO_PATH }}"
+        fi
+        
+        # 显示 vendor 目录结构
+        echo "Complete vendor/xiaomi structure:"
+        find vendor/xiaomi -type d -maxdepth 2 2>/dev/null | sort || echo "vendor/xiaomi not found"
     
     - name: Setup ccache
       working-directory: ${{ env.WORK_DIR }}
@@ -198,6 +241,13 @@ jobs:
           if [ -d "vendor/xiaomi" ]; then
             echo "Contents of vendor/xiaomi:"
             ls -la vendor/xiaomi/
+            
+            # 检查特定的 vendor 文件
+            if [ -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ]; then
+              echo "✓ Found BoardConfigVendor.mk for mido"
+            else
+              echo "✗ BoardConfigVendor.mk not found for mido"
+            fi
           fi
           
           exit 1
@@ -232,6 +282,14 @@ jobs:
           export TARGET_PRODUCT=lineage_${{ env.DEVICE }}
           export TARGET_BUILD_VARIANT=userdebug
           lunch
+        fi
+        
+        # 检查 vendor 文件是否就绪
+        echo "Checking vendor files before build:"
+        if [ -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ]; then
+          echo "✓ Vendor files are ready"
+        else
+          echo "⚠️ Warning: BoardConfigVendor.mk not found, build might fail"
         fi
         
         mka bacon -j$(nproc --all) 2>&1 | tee build.log
