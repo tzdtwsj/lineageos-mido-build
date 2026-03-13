@@ -137,29 +137,14 @@ jobs:
         echo "Cloning vendor from ${{ env.VENDOR_REPO }} (branch: ${{ env.VENDOR_BRANCH }})"
         git clone --depth=1 --branch ${{ env.VENDOR_BRANCH }} ${{ env.VENDOR_REPO }} ${{ env.VENDOR_PATH }}
         
-        # 验证 vendor 结构
         echo "Vendor repository contents:"
         ls -la ${{ env.VENDOR_PATH }}/
-        
-        # 检查 mido 相关的 vendor 目录
-        if [ -d "${{ env.VENDOR_PATH }}/mido" ]; then
-          echo "✓ Found mido vendor directory"
-        else
-          echo "⚠️ Warning: mido vendor directory not found"
-        fi
-        
-        if [ -d "${{ env.VENDOR_PATH }}/msm8953-common" ]; then
-          echo "✓ Found msm8953-common vendor directory"
-        else
-          echo "⚠️ Warning: msm8953-common vendor directory not found"
-        fi
     
     - name: Create vendor symlinks if needed
       working-directory: ${{ env.WORK_DIR }}
       run: |
         echo "Checking and creating vendor symlinks..."
         
-        # 确保 BoardConfigVendor.mk 存在
         if [ ! -f "${{ env.VENDOR_PATH }}/mido/BoardConfigVendor.mk" ] && [ -f "${{ env.VENDOR_PATH }}/msm8953-common/BoardConfigVendor.mk" ]; then
           echo "Creating symlink for BoardConfigVendor.mk..."
           mkdir -p ${{ env.VENDOR_PATH }}/mido
@@ -181,21 +166,10 @@ jobs:
         for dir in "${directories[@]}"; do
           if [ -d "$dir" ]; then
             echo "✓ $dir exists"
-            # 显示目录内容的前几项
-            ls -la "$dir" | head -5
           else
             echo "✗ $dir not found"
           fi
         done
-        
-        # 特别检查 vendor 子目录
-        echo "Vendor subdirectories:"
-        if [ -d "${{ env.VENDOR_PATH }}/mido" ]; then
-          echo "✓ vendor/xiaomi/mido exists"
-        fi
-        if [ -d "${{ env.VENDOR_PATH }}/msm8953-common" ]; then
-          echo "✓ vendor/xiaomi/msm8953-common exists"
-        fi
     
     - name: Setup ccache
       working-directory: ${{ env.WORK_DIR }}
@@ -210,38 +184,7 @@ jobs:
       working-directory: ${{ env.WORK_DIR }}
       run: |
         source build/envsetup.sh
-        
-        echo "Setting up build environment for ${{ env.DEVICE }}..."
-        
-        # 尝试 breakfast
-        if breakfast ${{ env.DEVICE }}; then
-          echo "✓ breakfast successful"
-        else
-          echo "breakfast failed, trying lunch with lineage_arm64..."
-          export TARGET_PRODUCT=lineage_arm64
-          export TARGET_BUILD_VARIANT=userdebug
-          
-          if lunch lineage_arm64-userdebug; then
-            echo "✓ lunch successful"
-            export TARGET_DEVICE=${{ env.DEVICE }}
-          else
-            echo "✗ Failed to set up build environment"
-            exit 1
-          fi
-        fi
-        
-        # 显示环境变量
-        echo "Build environment:"
-        echo "TARGET_PRODUCT: $TARGET_PRODUCT"
-        echo "TARGET_DEVICE: $TARGET_DEVICE"
-        echo "TARGET_BUILD_VARIANT: $TARGET_BUILD_VARIANT"
-        
-        # 验证 vendor 配置
-        if [ -f "${{ env.VENDOR_PATH }}/mido/BoardConfigVendor.mk" ]; then
-          echo "✓ Vendor configuration found"
-        else
-          echo "⚠️ Vendor configuration not found"
-        fi
+        echo "✓ Build environment setup complete"
     
     - name: Clean build if requested
       working-directory: ${{ env.WORK_DIR }}
@@ -254,7 +197,7 @@ jobs:
           make clobber
         fi
     
-    - name: Start build
+    - name: Start build with brunch
       id: build
       working-directory: ${{ env.WORK_DIR }}
       run: |
@@ -263,11 +206,11 @@ jobs:
         echo "Disk space before build:"
         df -h
         
-        echo "Starting build for ${{ env.DEVICE }}..."
+        echo "Starting build for ${{ env.DEVICE }} using brunch..."
         echo "Build started at: $(date)"
         
-        # 开始编译
-        mka bacon -j$(nproc --all) 2>&1 | tee build.log
+        # 使用 brunch 命令开始编译
+        brunch ${{ env.DEVICE }} 2>&1 | tee build.log
         
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
           echo "Build failed!"
