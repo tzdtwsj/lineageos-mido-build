@@ -94,7 +94,6 @@ jobs:
         echo "Disk space after sync:"
         df -h
     
-    # 新增：同步公共 vendor 仓库 (msm8953-common)
     - name: Sync common vendor repository
       working-directory: ${{ env.WORK_DIR }}
       run: |
@@ -125,7 +124,6 @@ jobs:
           exit 1
         fi
     
-    # 新增：同步 mido 专用 vendor 仓库
     - name: Sync mido vendor repository
       working-directory: ${{ env.WORK_DIR }}
       run: |
@@ -156,7 +154,6 @@ jobs:
           exit 1
         fi
     
-    # 新增：检查 vendor 文件结构
     - name: Verify vendor structure
       working-directory: ${{ env.WORK_DIR }}
       run: |
@@ -194,66 +191,59 @@ jobs:
       run: |
         source build/envsetup.sh
         
-        echo "Available devices (first 20):"
-        lunch | head -20
+        echo "Available combos:"
+        lunch | head -30
         
-        echo "Attempting breakfast ${{ env.DEVICE }}..."
-        if ! breakfast ${{ env.DEVICE }}; then
-          echo "breakfast failed, trying alternative approach..."
+        echo "Setting up build environment for ${{ env.DEVICE }}..."
+        
+        # 首先尝试 breakfast
+        if breakfast ${{ env.DEVICE }}; then
+          echo "✓ breakfast successful"
+        else
+          echo "breakfast failed, trying manual setup..."
           
-          # 尝试直接使用 lunch
-          echo "Searching for ${{ env.DEVICE }} in lunch menu:"
-          lunch | grep -i "${{ env.DEVICE }}" || true
+          # 使用通用 ARM64 目标
+          export TARGET_PRODUCT=lineage_arm64
+          export TARGET_BUILD_VARIANT=userdebug
           
-          # 尝试常见的设备名称变体
-          for VARIANT in "lineage_${{ env.DEVICE }}" "${{ env.DEVICE }}" "full_${{ env.DEVICE }}"; do
-            echo "Trying with TARGET_PRODUCT=${VARIANT}"
-            export TARGET_PRODUCT=${VARIANT}
-            export TARGET_BUILD_VARIANT=userdebug
-            if lunch ${TARGET_PRODUCT}-${TARGET_BUILD_VARIANT} 2>/dev/null; then
-              echo "Success with ${VARIANT}"
-              exit 0
-            fi
-          done
-          
-          echo "Error: Device ${{ env.DEVICE }} not found in source tree"
-          echo "Checking device tree location..."
-          
-          # 检查设备树
-          if [ -d "device/xiaomi/${{ env.DEVICE }}" ]; then
-            echo "✓ Device tree found at device/xiaomi/${{ env.DEVICE }}"
-            ls -la device/xiaomi/${{ env.DEVICE }}/
-          else
-            echo "✗ Device tree not found at device/xiaomi/${{ env.DEVICE }}"
-          fi
-          
-          # 搜索任何 mido 相关的目录
-          echo "Searching for any mido directories..."
-          find . -type d -name "*mido*" 2>/dev/null | head -10 || echo "No mido directories found"
-          
-          # 列出 device/xiaomi 目录内容
-          if [ -d "device/xiaomi" ]; then
-            echo "Contents of device/xiaomi:"
-            ls -la device/xiaomi/
-          fi
-          
-          # 检查 vendor 目录
-          if [ -d "vendor/xiaomi" ]; then
-            echo "Contents of vendor/xiaomi:"
-            ls -la vendor/xiaomi/
+          if lunch lineage_arm64-userdebug; then
+            echo "✓ lunch lineage_arm64-userdebug successful"
             
-            # 检查特定的 vendor 文件
-            if [ -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ]; then
-              echo "✓ Found BoardConfigVendor.mk for mido"
-            else
-              echo "✗ BoardConfigVendor.mk not found for mido"
-            fi
+            # 手动设置设备变量
+            export TARGET_DEVICE=${{ env.DEVICE }}
+            export DEVICE_PATH=device/xiaomi/${{ env.DEVICE }}
+            
+            echo "Manual environment setup complete"
+          else
+            echo "✗ Failed to set up build environment"
+            exit 1
           fi
-          
-          exit 1
         fi
         
-        echo "✓ Build environment setup successful"
+        # 验证环境
+        echo "Current environment:"
+        echo "TARGET_PRODUCT: $TARGET_PRODUCT"
+        echo "TARGET_DEVICE: $TARGET_DEVICE"
+        echo "TARGET_BUILD_VARIANT: $TARGET_BUILD_VARIANT"
+        
+        # 检查必要的目录
+        echo "Checking directories:"
+        if [ -d "device/xiaomi/${{ env.DEVICE }}" ]; then
+          echo "✓ device/xiaomi/${{ env.DEVICE }} exists"
+          ls -la device/xiaomi/${{ env.DEVICE }}/ | head -10
+        else
+          echo "✗ device/xiaomi/${{ env.DEVICE }} not found"
+        fi
+        
+        if [ -d "vendor/xiaomi/mido" ]; then
+          echo "✓ vendor/xiaomi/mido exists"
+        elif [ -d "vendor/xiaomi/msm8953-common" ]; then
+          echo "✓ vendor/xiaomi/msm8953-common exists"
+        else
+          echo "✗ No vendor directory found"
+        fi
+        
+        echo "✓ Build environment setup complete"
     
     - name: Clean build if requested
       working-directory: ${{ env.WORK_DIR }}
@@ -276,21 +266,87 @@ jobs:
         echo "Disk space before build:"
         df -h
         
-        # 确保环境已设置
-        if [ -z "$TARGET_PRODUCT" ]; then
-          echo "TARGET_PRODUCT not set, attempting to set..."
-          export TARGET_PRODUCT=lineage_${{ env.DEVICE }}
+        # 设置构建目标
+        echo "Setting up build environment for mido..."
+        
+        # 首先尝试使用 breakfast（这是 LineageOS 推荐的方式）
+        if breakfast mido; then
+          echo "✓ breakfast mido successful"
+        else
+          echo "breakfast failed, trying alternative approach..."
+          
+          # 设置基础架构目标
+          export TARGET_PRODUCT=lineage_arm64
           export TARGET_BUILD_VARIANT=userdebug
-          lunch
+          
+          # 尝试 lunch 使用通用 arm64 目标
+          echo "Trying lunch with lineage_arm64-userdebug"
+          if lunch lineage_arm64-userdebug; then
+            echo "✓ lunch lineage_arm64-userdebug successful"
+            
+            # 手动设置设备变量
+            export TARGET_DEVICE=mido
+            export TARGET_PRODUCT=lineage_mido
+            
+            # 添加设备树到路径
+            if [ -d "device/xiaomi/mido" ]; then
+              echo "Adding device/xiaomi/mido to device path"
+              export DEVICE_PATH=device/xiaomi/mido
+            fi
+          else
+            echo "✗ Failed to set up build environment"
+            exit 1
+          fi
         fi
         
-        # 检查 vendor 文件是否就绪
+        # 验证环境设置
+        echo "Current build variables:"
+        echo "TARGET_PRODUCT: $TARGET_PRODUCT"
+        echo "TARGET_DEVICE: $TARGET_DEVICE"
+        echo "TARGET_BUILD_VARIANT: $TARGET_BUILD_VARIANT"
+        
+        # 检查设备树是否正确加载
+        echo "Checking device tree:"
+        if [ -n "$TARGET_DEVICE" ] && [ "$TARGET_DEVICE" = "mido" ]; then
+          echo "✓ Device is set to mido"
+        else
+          echo "⚠️ Device not set to mido, attempting to fix..."
+          export TARGET_DEVICE=mido
+        fi
+        
+        # 检查 vendor 文件
         echo "Checking vendor files before build:"
         if [ -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ]; then
           echo "✓ Vendor files are ready"
         else
           echo "⚠️ Warning: BoardConfigVendor.mk not found, build might fail"
+          echo "Contents of vendor/xiaomi:"
+          ls -la vendor/xiaomi/ 2>/dev/null || echo "vendor/xiaomi not found"
+          echo "Contents of vendor/xiaomi/mido:"
+          ls -la vendor/xiaomi/mido/ 2>/dev/null || echo "vendor/xiaomi/mido not found"
+          echo "Contents of vendor/xiaomi/msm8953-common:"
+          ls -la vendor/xiaomi/msm8953-common/ 2>/dev/null || echo "vendor/xiaomi/msm8953-common not found"
         fi
+        
+        # 确保 vendor 配置文件存在
+        if [ ! -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ] && [ -f "vendor/xiaomi/msm8953-common/BoardConfigVendor.mk" ]; then
+          echo "Creating symlink for BoardConfigVendor.mk..."
+          mkdir -p vendor/xiaomi/mido
+          ln -sf ../msm8953-common/BoardConfigVendor.mk vendor/xiaomi/mido/BoardConfigVendor.mk
+        fi
+        
+        # 检查设备配置文件
+        if [ -f "device/xiaomi/mido/lineage_mido.mk" ]; then
+          echo "✓ Device makefile found"
+          # 显示设备配置
+          head -20 device/xiaomi/mido/lineage_mido.mk
+        else
+          echo "⚠️ Warning: device/xiaomi/mido/lineage_mido.mk not found"
+        fi
+        
+        # 开始编译
+        echo "Starting build for mido..."
+        echo "Using command: mka bacon -j$(nproc --all)"
         
         mka bacon -j$(nproc --all) 2>&1 | tee build.log
         
