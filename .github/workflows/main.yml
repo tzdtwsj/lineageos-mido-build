@@ -6,7 +6,7 @@ on:
       sync_source:
         description: '是否重新同步源码 (yes/no)'
         required: true
-        default: 'no'
+        default: 'yes'
       make_clean:
         description: '是否清理编译输出 (clean/clobber/no)'
         required: true
@@ -216,6 +216,40 @@ jobs:
         else
           make clobber
         fi
+    
+    - name: Fix duplicate module definitions
+      working-directory: ${{ env.WORK_DIR }}
+      run: |
+        echo "=========================================="
+        echo "Fixing duplicate chargeonlymode definition..."
+        echo "=========================================="
+        
+        # 方法1: 如果 device 中的版本更新，禁用 vendor 中的版本
+        if [ -f "vendor/xiaomi/msm8953-common/msm8953-common-vendor.mk" ]; then
+          echo "Fixing vendor/xiaomi/msm8953-common/msm8953-common-vendor.mk"
+          sed -i '/chargeonlymode/d' vendor/xiaomi/msm8953-common/msm8953-common-vendor.mk
+        fi
+        
+        # 方法2: 如果 vendor 中的版本是必要的，重命名或移动它
+        if [ -f "vendor/xiaomi/msm8953-common/rootdir/chargeonlymode" ]; then
+          echo "Moving vendor chargeonlymode to backup"
+          mv vendor/xiaomi/msm8953-common/rootdir/chargeonlymode \
+             vendor/xiaomi/msm8953-common/rootdir/chargeonlymode.bak
+        fi
+        
+        # 方法3: 检查并修复所有相关的 makefile
+        echo "Checking for other chargeonlymode definitions..."
+        find vendor/xiaomi -name "*.mk" | while read mkfile; do
+          if grep -q "chargeonlymode" "$mkfile"; then
+            echo "Found chargeonlymode in: $mkfile"
+            # 备份原文件
+            cp "$mkfile" "$mkfile.bak" 2>/dev/null || true
+            # 注释掉相关行
+            sed -i '/chargeonlymode/s/^/#/' "$mkfile"
+          fi
+        done
+        
+        echo "✓ Duplicate module fixes applied"
     
     - name: Build ROM
       id: build
