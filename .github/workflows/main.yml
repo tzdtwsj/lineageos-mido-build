@@ -18,13 +18,32 @@ on:
       - 'release-*'
 
 env:
+  # 工作目录
   WORK_DIR: ${{ github.workspace }}/android
+  
+  # 设备信息
   DEVICE: mido
   BRANCH: lineage-16.0
-  VENDOR_COMMON_REPO: https://github.com/xiaomi-msm8953-devs/proprietary_vendor_xiaomi_msm8953-common
-  VENDOR_COMMON_PATH: vendor/xiaomi/msm8953-common
-  VENDOR_MIDO_REPO: https://github.com/NRanjan-17/vendor_xiaomi_mido
-  VENDOR_MIDO_PATH: vendor/xiaomi/mido
+  
+  # Kernel 配置
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_xiaomi_msm8953
+  KERNEL_PATH: kernel/xiaomi/msm8953
+  KERNEL_BRANCH: lineage-16.0
+  
+  # Device Tree 配置
+  DEVICE_TREE_REPO: https://github.com/LineageOS/android_device_xiaomi_mido
+  DEVICE_TREE_PATH: device/xiaomi/mido
+  DEVICE_TREE_BRANCH: lineage-16.0
+  
+  # Common Device Tree 配置
+  DEVICE_COMMON_REPO: https://github.com/LineageOS/android_device_xiaomi_msm8953-common
+  DEVICE_COMMON_PATH: device/xiaomi/msm8953-common
+  DEVICE_COMMON_BRANCH: lineage-16.0
+  
+  # Vendor 配置 - 合并为一个仓库
+  VENDOR_REPO: https://github.com/zeelog/proprietary_vendor_xiaomi
+  VENDOR_PATH: vendor/xiaomi
+  VENDOR_BRANCH: lineage-16.0
 
 jobs:
   build:
@@ -64,7 +83,7 @@ jobs:
     - name: Initialize repo
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1 --git-lfs --no-clone-bundle
+        repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1
     
     - name: Sync source
       working-directory: ${{ env.WORK_DIR }}
@@ -79,7 +98,7 @@ jobs:
         
         for i in {1..3}; do
           echo "Sync attempt $i"
-          if repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune; then
+          if repo sync -c -j$(nproc --all) --force-sync --no-tags --optimized-fetch --prune; then
             echo "Sync successful"
             break
           fi
@@ -94,88 +113,89 @@ jobs:
         echo "Disk space after sync:"
         df -h
     
-    - name: Sync common vendor repository
+    - name: Clone device tree
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        echo "Syncing common vendor repository: ${{ env.VENDOR_COMMON_REPO }}"
+        echo "Cloning device tree from ${{ env.DEVICE_TREE_REPO }} (branch: ${{ env.DEVICE_TREE_BRANCH }})"
+        git clone --depth=1 --branch ${{ env.DEVICE_TREE_BRANCH }} ${{ env.DEVICE_TREE_REPO }} ${{ env.DEVICE_TREE_PATH }}
+    
+    - name: Clone common device tree
+      working-directory: ${{ env.WORK_DIR }}
+      run: |
+        echo "Cloning common device tree from ${{ env.DEVICE_COMMON_REPO }} (branch: ${{ env.DEVICE_COMMON_BRANCH }})"
+        git clone --depth=1 --branch ${{ env.DEVICE_COMMON_BRANCH }} ${{ env.DEVICE_COMMON_REPO }} ${{ env.DEVICE_COMMON_PATH }}
+    
+    - name: Clone kernel
+      working-directory: ${{ env.WORK_DIR }}
+      run: |
+        echo "Cloning kernel from ${{ env.KERNEL_REPO }} (branch: ${{ env.KERNEL_BRANCH }})"
+        git clone --depth=1 --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} ${{ env.KERNEL_PATH }}
+    
+    - name: Clone vendor repository
+      working-directory: ${{ env.WORK_DIR }}
+      run: |
+        echo "Cloning vendor from ${{ env.VENDOR_REPO }} (branch: ${{ env.VENDOR_BRANCH }})"
+        git clone --depth=1 --branch ${{ env.VENDOR_BRANCH }} ${{ env.VENDOR_REPO }} ${{ env.VENDOR_PATH }}
         
-        # 创建 vendor 目录（如果不存在）
-        mkdir -p ${{ env.VENDOR_COMMON_PATH }}
+        # 验证 vendor 结构
+        echo "Vendor repository contents:"
+        ls -la ${{ env.VENDOR_PATH }}/
         
-        # 检查是否已经存在 vendor 仓库
-        if [ -d "${{ env.VENDOR_COMMON_PATH }}/.git" ]; then
-          echo "Common vendor repository exists, updating..."
-          cd ${{ env.VENDOR_COMMON_PATH }}
-          git pull
-          cd ${{ env.WORK_DIR }}
+        # 检查 mido 相关的 vendor 目录
+        if [ -d "${{ env.VENDOR_PATH }}/mido" ]; then
+          echo "✓ Found mido vendor directory"
         else
-          echo "Cloning common vendor repository..."
-          # 克隆 vendor 仓库
-          git clone --depth=1 ${{ env.VENDOR_COMMON_REPO }} ${{ env.VENDOR_COMMON_PATH }}
+          echo "⚠️ Warning: mido vendor directory not found"
         fi
         
-        # 验证 vendor 仓库是否成功克隆
-        if [ -d "${{ env.VENDOR_COMMON_PATH }}" ]; then
-          echo "✓ Common vendor repository synced successfully"
-          echo "Common vendor repository contents:"
-          ls -la ${{ env.VENDOR_COMMON_PATH }}/
+        if [ -d "${{ env.VENDOR_PATH }}/msm8953-common" ]; then
+          echo "✓ Found msm8953-common vendor directory"
         else
-          echo "✗ Failed to sync common vendor repository"
-          exit 1
+          echo "⚠️ Warning: msm8953-common vendor directory not found"
         fi
     
-    - name: Sync mido vendor repository
+    - name: Create vendor symlinks if needed
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        echo "Syncing mido vendor repository: ${{ env.VENDOR_MIDO_REPO }}"
+        echo "Checking and creating vendor symlinks..."
         
-        # 创建 vendor 目录（如果不存在）
-        mkdir -p ${{ env.VENDOR_MIDO_PATH }}
-        
-        # 检查是否已经存在 vendor 仓库
-        if [ -d "${{ env.VENDOR_MIDO_PATH }}/.git" ]; then
-          echo "Mido vendor repository exists, updating..."
-          cd ${{ env.VENDOR_MIDO_PATH }}
-          git pull
-          cd ${{ env.WORK_DIR }}
-        else
-          echo "Cloning mido vendor repository..."
-          # 克隆 vendor 仓库
-          git clone --depth=1 ${{ env.VENDOR_MIDO_REPO }} ${{ env.VENDOR_MIDO_PATH }}
-        fi
-        
-        # 验证 vendor 仓库是否成功克隆
-        if [ -d "${{ env.VENDOR_MIDO_PATH }}" ]; then
-          echo "✓ Mido vendor repository synced successfully"
-          echo "Mido vendor repository contents:"
-          ls -la ${{ env.VENDOR_MIDO_PATH }}/
-        else
-          echo "✗ Failed to sync mido vendor repository"
-          exit 1
+        # 确保 BoardConfigVendor.mk 存在
+        if [ ! -f "${{ env.VENDOR_PATH }}/mido/BoardConfigVendor.mk" ] && [ -f "${{ env.VENDOR_PATH }}/msm8953-common/BoardConfigVendor.mk" ]; then
+          echo "Creating symlink for BoardConfigVendor.mk..."
+          mkdir -p ${{ env.VENDOR_PATH }}/mido
+          ln -sf ../msm8953-common/BoardConfigVendor.mk ${{ env.VENDOR_PATH }}/mido/BoardConfigVendor.mk
         fi
     
-    - name: Verify vendor structure
+    - name: Verify directory structure
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        echo "Checking vendor directory structure..."
+        echo "Checking directory structure..."
         
-        # 检查公共 vendor 目录
-        if [ -d "${{ env.VENDOR_COMMON_PATH }}" ]; then
-          echo "✓ Common vendor found at ${{ env.VENDOR_COMMON_PATH }}"
-        else
-          echo "✗ Common vendor not found at ${{ env.VENDOR_COMMON_PATH }}"
+        directories=(
+          "${{ env.DEVICE_TREE_PATH }}"
+          "${{ env.DEVICE_COMMON_PATH }}"
+          "${{ env.KERNEL_PATH }}"
+          "${{ env.VENDOR_PATH }}"
+        )
+        
+        for dir in "${directories[@]}"; do
+          if [ -d "$dir" ]; then
+            echo "✓ $dir exists"
+            # 显示目录内容的前几项
+            ls -la "$dir" | head -5
+          else
+            echo "✗ $dir not found"
+          fi
+        done
+        
+        # 特别检查 vendor 子目录
+        echo "Vendor subdirectories:"
+        if [ -d "${{ env.VENDOR_PATH }}/mido" ]; then
+          echo "✓ vendor/xiaomi/mido exists"
         fi
-        
-        # 检查 mido vendor 目录
-        if [ -d "${{ env.VENDOR_MIDO_PATH }}" ]; then
-          echo "✓ Mido vendor found at ${{ env.VENDOR_MIDO_PATH }}"
-        else
-          echo "✗ Mido vendor not found at ${{ env.VENDOR_MIDO_PATH }}"
+        if [ -d "${{ env.VENDOR_PATH }}/msm8953-common" ]; then
+          echo "✓ vendor/xiaomi/msm8953-common exists"
         fi
-        
-        # 显示 vendor 目录结构
-        echo "Complete vendor/xiaomi structure:"
-        find vendor/xiaomi -type d -maxdepth 2 2>/dev/null | sort || echo "vendor/xiaomi not found"
     
     - name: Setup ccache
       working-directory: ${{ env.WORK_DIR }}
@@ -191,59 +211,37 @@ jobs:
       run: |
         source build/envsetup.sh
         
-        echo "Available combos:"
-        lunch | head -30
-        
         echo "Setting up build environment for ${{ env.DEVICE }}..."
         
-        # 首先尝试 breakfast
+        # 尝试 breakfast
         if breakfast ${{ env.DEVICE }}; then
           echo "✓ breakfast successful"
         else
-          echo "breakfast failed, trying manual setup..."
-          
-          # 使用通用 ARM64 目标
+          echo "breakfast failed, trying lunch with lineage_arm64..."
           export TARGET_PRODUCT=lineage_arm64
           export TARGET_BUILD_VARIANT=userdebug
           
           if lunch lineage_arm64-userdebug; then
-            echo "✓ lunch lineage_arm64-userdebug successful"
-            
-            # 手动设置设备变量
+            echo "✓ lunch successful"
             export TARGET_DEVICE=${{ env.DEVICE }}
-            export DEVICE_PATH=device/xiaomi/${{ env.DEVICE }}
-            
-            echo "Manual environment setup complete"
           else
             echo "✗ Failed to set up build environment"
             exit 1
           fi
         fi
         
-        # 验证环境
-        echo "Current environment:"
+        # 显示环境变量
+        echo "Build environment:"
         echo "TARGET_PRODUCT: $TARGET_PRODUCT"
         echo "TARGET_DEVICE: $TARGET_DEVICE"
         echo "TARGET_BUILD_VARIANT: $TARGET_BUILD_VARIANT"
         
-        # 检查必要的目录
-        echo "Checking directories:"
-        if [ -d "device/xiaomi/${{ env.DEVICE }}" ]; then
-          echo "✓ device/xiaomi/${{ env.DEVICE }} exists"
-          ls -la device/xiaomi/${{ env.DEVICE }}/ | head -10
+        # 验证 vendor 配置
+        if [ -f "${{ env.VENDOR_PATH }}/mido/BoardConfigVendor.mk" ]; then
+          echo "✓ Vendor configuration found"
         else
-          echo "✗ device/xiaomi/${{ env.DEVICE }} not found"
+          echo "⚠️ Vendor configuration not found"
         fi
-        
-        if [ -d "vendor/xiaomi/mido" ]; then
-          echo "✓ vendor/xiaomi/mido exists"
-        elif [ -d "vendor/xiaomi/msm8953-common" ]; then
-          echo "✓ vendor/xiaomi/msm8953-common exists"
-        else
-          echo "✗ No vendor directory found"
-        fi
-        
-        echo "✓ Build environment setup complete"
     
     - name: Clean build if requested
       working-directory: ${{ env.WORK_DIR }}
@@ -259,102 +257,26 @@ jobs:
     - name: Start build
       id: build
       working-directory: ${{ env.WORK_DIR }}
-      continue-on-error: false
       run: |
         source build/envsetup.sh
         
         echo "Disk space before build:"
         df -h
         
-        # 设置构建目标
-        echo "Setting up build environment for mido..."
-        
-        # 首先尝试使用 breakfast（这是 LineageOS 推荐的方式）
-        if breakfast mido; then
-          echo "✓ breakfast mido successful"
-        else
-          echo "breakfast failed, trying alternative approach..."
-          
-          # 设置基础架构目标
-          export TARGET_PRODUCT=lineage_arm64
-          export TARGET_BUILD_VARIANT=userdebug
-          
-          # 尝试 lunch 使用通用 arm64 目标
-          echo "Trying lunch with lineage_arm64-userdebug"
-          if lunch lineage_arm64-userdebug; then
-            echo "✓ lunch lineage_arm64-userdebug successful"
-            
-            # 手动设置设备变量
-            export TARGET_DEVICE=mido
-            export TARGET_PRODUCT=lineage_mido
-            
-            # 添加设备树到路径
-            if [ -d "device/xiaomi/mido" ]; then
-              echo "Adding device/xiaomi/mido to device path"
-              export DEVICE_PATH=device/xiaomi/mido
-            fi
-          else
-            echo "✗ Failed to set up build environment"
-            exit 1
-          fi
-        fi
-        
-        # 验证环境设置
-        echo "Current build variables:"
-        echo "TARGET_PRODUCT: $TARGET_PRODUCT"
-        echo "TARGET_DEVICE: $TARGET_DEVICE"
-        echo "TARGET_BUILD_VARIANT: $TARGET_BUILD_VARIANT"
-        
-        # 检查设备树是否正确加载
-        echo "Checking device tree:"
-        if [ -n "$TARGET_DEVICE" ] && [ "$TARGET_DEVICE" = "mido" ]; then
-          echo "✓ Device is set to mido"
-        else
-          echo "⚠️ Device not set to mido, attempting to fix..."
-          export TARGET_DEVICE=mido
-        fi
-        
-        # 检查 vendor 文件
-        echo "Checking vendor files before build:"
-        if [ -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ]; then
-          echo "✓ Vendor files are ready"
-        else
-          echo "⚠️ Warning: BoardConfigVendor.mk not found, build might fail"
-          echo "Contents of vendor/xiaomi:"
-          ls -la vendor/xiaomi/ 2>/dev/null || echo "vendor/xiaomi not found"
-          echo "Contents of vendor/xiaomi/mido:"
-          ls -la vendor/xiaomi/mido/ 2>/dev/null || echo "vendor/xiaomi/mido not found"
-          echo "Contents of vendor/xiaomi/msm8953-common:"
-          ls -la vendor/xiaomi/msm8953-common/ 2>/dev/null || echo "vendor/xiaomi/msm8953-common not found"
-        fi
-        
-        # 确保 vendor 配置文件存在
-        if [ ! -f "vendor/xiaomi/mido/BoardConfigVendor.mk" ] && [ -f "vendor/xiaomi/msm8953-common/BoardConfigVendor.mk" ]; then
-          echo "Creating symlink for BoardConfigVendor.mk..."
-          mkdir -p vendor/xiaomi/mido
-          ln -sf ../msm8953-common/BoardConfigVendor.mk vendor/xiaomi/mido/BoardConfigVendor.mk
-        fi
-        
-        # 检查设备配置文件
-        if [ -f "device/xiaomi/mido/lineage_mido.mk" ]; then
-          echo "✓ Device makefile found"
-          # 显示设备配置
-          head -20 device/xiaomi/mido/lineage_mido.mk
-        else
-          echo "⚠️ Warning: device/xiaomi/mido/lineage_mido.mk not found"
-        fi
+        echo "Starting build for ${{ env.DEVICE }}..."
+        echo "Build started at: $(date)"
         
         # 开始编译
-        echo "Starting build for mido..."
-        echo "Using command: mka bacon -j$(nproc --all)"
-        
         mka bacon -j$(nproc --all) 2>&1 | tee build.log
         
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
           echo "Build failed!"
+          echo "Last 50 lines of build log:"
+          tail -50 build.log
           exit 1
         fi
         
+        echo "Build completed at: $(date)"
         echo "Disk space after build:"
         df -h
     
@@ -364,7 +286,12 @@ jobs:
       run: |
         TARGET_DIR="out/target/product/${{ env.DEVICE }}"
         
-        ROM_ZIP=$(find ${TARGET_DIR} -maxdepth 1 -name "lineage-*.zip" -not -name "*ota*" -not -name "*signed*" | head -n 1)
+        if [ ! -d "$TARGET_DIR" ]; then
+          echo "Error: Target directory not found"
+          exit 1
+        fi
+        
+        ROM_ZIP=$(find ${TARGET_DIR} -maxdepth 1 -name "lineage-*.zip" ! -name "*ota*" ! -name "*signed*" | head -n 1)
         ROM_MD5=$(find ${TARGET_DIR} -maxdepth 1 -name "lineage-*.md5sum" | head -n 1)
         RECOVERY_IMG=$(find ${TARGET_DIR} -maxdepth 1 -name "recovery.img" | head -n 1)
         BOOT_IMG=$(find ${TARGET_DIR} -maxdepth 1 -name "boot.img" | head -n 1)
@@ -374,9 +301,16 @@ jobs:
         echo "recovery_img=${RECOVERY_IMG}" >> $GITHUB_OUTPUT
         echo "boot_img=${BOOT_IMG}" >> $GITHUB_OUTPUT
         
+        # 复制构建日志
         if [ -f "build.log" ]; then
           cp build.log ${TARGET_DIR}/build.log 2>/dev/null || true
         fi
+        
+        echo "Found artifacts:"
+        echo "ROM: ${ROM_ZIP}"
+        echo "MD5: ${ROM_MD5}"
+        echo "Recovery: ${RECOVERY_IMG}"
+        echo "Boot: ${BOOT_IMG}"
     
     - name: Create Release and upload assets
       uses: softprops/action-gh-release@v2
@@ -386,20 +320,20 @@ jobs:
         body: |
           ## LineageOS 16.0 (Android 9.0) for Xiaomi Redmi Note 4 (mido)
           
-          ### ⚡ 编译信息
-          - 编译时间: ${{ github.event.repository.updated_at }}
+          ### 编译信息
+          - 编译时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
           - 触发者: ${{ github.actor }}
-          - 工作流运行ID: ${{ github.run_id }}
+          - 运行ID: ${{ github.run_id }}
           
-          ### 📦 包含文件
-          - ROM包 (lineage-*.zip)
-          - MD5校验文件
-          - Recovery镜像
-          - Boot镜像
+          ### 包含文件
+          ${{ steps.find_artifacts.outputs.rom_zip && '- ROM包 (lineage-*.zip)' || '' }}
+          ${{ steps.find_artifacts.outputs.rom_md5 && '- MD5校验文件' || '' }}
+          ${{ steps.find_artifacts.outputs.recovery_img && '- Recovery镜像' || '' }}
+          ${{ steps.find_artifacts.outputs.boot_img && '- Boot镜像' || '' }}
           - 编译日志
           
-          ### ⚠️ 注意事项
-          - 这是GitHub Actions自动构建版本
+          ### 注意事项
+          - GitHub Actions自动构建版本
           - 刷机前请做好数据备份
           - 建议使用最新版TWRP刷入
         files: |
