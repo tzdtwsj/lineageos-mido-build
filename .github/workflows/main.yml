@@ -60,7 +60,7 @@ jobs:
     - name: Initialize repo
       working-directory: ${{ env.WORK_DIR }}
       run: |
-        repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1
+        repo init -u https://github.com/LineageOS/android.git -b ${{ env.BRANCH }} --depth=1 --git-lfs --no-clone-bundle
     
     - name: Sync source
       working-directory: ${{ env.WORK_DIR }}
@@ -75,7 +75,7 @@ jobs:
         
         for i in {1..3}; do
           echo "Sync attempt $i"
-          if repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune; then
+          if repo sync; then #-c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune; then
             echo "Sync successful"
             break
           fi
